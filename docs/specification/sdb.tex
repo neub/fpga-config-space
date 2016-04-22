@@ -31,11 +31,11 @@
 \makesavenoteenv{tabular}
 
 \title{Self-Describing Bus (SDB)\\
-Specification for Logic Cores -- Version 1.1 (+ changes)}
+Specification for Logic Cores -- Version 1.2}
 \author{Alessandro Rubini (Consultant for CERN)\\
 Wesley Terpstra (GSI),\\
 Manohar Vanga (CERN, BE/CO/HT)}
-\date{April 11th 2013}
+\date{April 21th 2016}
 \begin{document}
 
 \maketitle
@@ -178,7 +178,7 @@ this idea but want to do it differently, please change the magic number, so to a
 headaches if both bus implementation are instantiated within the same host
 computer or network.
 
-
+\iffalse
 \subsection{Interrupts}
 
 This version of SDB doesn't describe interrupts.  Lack of interrupt
@@ -210,6 +210,8 @@ source code with static information about device wiring.  Thus,
 it may happen that future
 releases of this specification include description of legacy
 interrupts.
+
+\fi
 
 \subsection{The Overall System Structure}
 
@@ -294,6 +296,14 @@ The \textit{bridge} component marks a memory area leading to a lower-level
 address demultiplexer (i.e. an \textit{interconnect}). Its data
 structure declares the address where the self-description for the
 sub-bus is to be found, relative to the hosting \textit{interconnect}.
+
+\item[MSI] \hfill \\
+If the interconnect supports Message-Signalled-Interrupts (MSIs),
+devices must execute writes which are received by the bus master.
+The MSI address space is disjoint from the bus address space.
+This component record provides a bus master the information needed
+to discover its own address in the MSI address space, as seen from
+the point-of-view of the controlled Device.
 
 \item[Integration] \hfill \\
 The optional \textit{integration} product describes an aggregate bus.
@@ -687,6 +697,7 @@ unknown record type in the range 0x00-0x7f is found; unknown records in the rang
         sdb\_type\_interconnect & 0x00 & Interconnect record, first of a table \\ \hline
         sdb\_type\_device & 0x01 & Device definition \\ \hline
         sdb\_type\_bridge & 0x02 & Bridge to a sub-bus \\ \hline
+	sdb\_type\_msi & 0x03 & MSI backwards path \\ \hline
         & 0x03-0x6f & Reserved for future types \\ \hline
         & 0x70-0x7f & Local/temporary use \\ \hline
         sdb\_type\_integration & 0x80 & Informative: integration structure \\ \hline
@@ -925,6 +936,72 @@ cores without the need to change them.
 The value \textbf{must} point to an SDB array that begins with an \textit{interconnect} record.
 \textbf{Note}: version 1.0 of the specification
 got this point wrong, contrary to all existent implementations.
+
+\item[component] \hfill \\
+An embedded component info structure, where the type is 0x01 See Table \ref{sdb_component}.
+\end{description}
+
+\pagebreak 
+
+\subsubsection{MSI Record}
+
+If the interconnect supports Message-Signalled-Interrupts (MSIs),
+Devices send write signals to be received by the bus masters.
+The MSI address space is disjoint from the bus address space.
+This component record provides a bus master the information needed
+to discover its own address in the MSI address space, as seen from
+the point-of-view of the controlled Device. Typically, the bus master
+will write this address into an MSI target register in the Device.
+Then, when the Device signals the bus master, it uses the MSI adddress
+to route its message to the correct destination.
+
+A bus master traversing the SDB tree locates the record in each SDB table
+which describes itself.  By summing the addr\_first field of all matching
+MSI records in the path from the bus root to the slave device, the bus
+master can discover the first address which routes back to itself.
+
+Note that addr\_first and addr\_last in a MSI record are in a seperate
+address space from all other addresses described by SDB records. 
+Furthermore, whereas nested SDB tables describe a progressively smaller
+address space for Devices, the MSI address space grows larger the deeper
+down one traverses the SDB tree.  This is because there are progressively
+less target Devices deeper down the tree, but more target bus masters from 
+the point-of-view those Devices.
+
+\begin{figure}[h]
+\centering%
+\includegraphics[width=100mm]{img/sdb-msi.ps}
+\caption{The MSI Structure}
+\label{fig:FigureMSI}
+\end{figure}
+
+\begin{center}
+  \begin{savenotes}
+    \begin{table}[!ht]\footnotesize
+      \caption{SDB MSI Record (64 bytes, type 0x03)}\label{sdb_msi}\centering
+        \begin{tabular}{| c | c | c | l | c | p{5cm} |} \hline
+        First & Last & Size & Name & Value & Description \\ \hline
+        0x00 & 0x03 & 8 & msi\_flags & - & High bit indicates active bus master \\ \hline
+        0x04 & 0x07 & 8 & bus\_specific & - & Bus specific field (flags) \\ \hline
+        0x08 & 0x3f & 56 & sdb\_component & - & SDB Component structure \\ \hline
+        \end{tabular}
+    \end{table}
+  \end{savenotes}
+\end{center}
+
+\begin{description}
+\item[msi\_flags] \hfill \\
+
+The highest bit (lowest address in the big-endian table) denotes if this
+record matches the bus master executing the read. This bit will be zero
+when read by any other bus master. To date, this is the only bit in the SDB
+record which whose value MUST change at runtime. However, some existing
+implementations of SDB have used runtime-variable bits for other fields in
+the past (for example, hot-pluggable devices).
+
+\item[bus\_specific] \hfill \\
+This is a 4-byte field that holds bus-specific information, most likely flags. For current
+values, please refer to header files.
 
 \item[component] \hfill \\
 An embedded component info structure, where the type is 0x01 See Table \ref{sdb_component}.
