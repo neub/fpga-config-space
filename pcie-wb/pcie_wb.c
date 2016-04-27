@@ -345,6 +345,7 @@ static int probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	dev->msi = 1;
 	dev->wb.wops = &wb_ops;
 	dev->wb.parent = &pdev->dev;
+	dev->wb.mask = 0xffff;
 	mutex_init(&dev->mutex);
 	dev->window_offset = 0;
 	dev->low_addr = 0;

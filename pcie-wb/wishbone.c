@@ -19,7 +19,7 @@
 #include "wishbone.h"
 
 /* Module parameters */
-static unsigned int max_devices = WISHONE_MAX_DEVICES;
+static unsigned int max_devices = WISHBONE_MAX_DEVICES;
 
 /* Module globals */
 static LIST_HEAD(wishbone_list); /* Sorted by ascending minor number */
@@ -109,6 +109,49 @@ static inline void eb_from_cpu(unsigned char* x, wb_data_t dat)
 	}
 }
 
+static void claim_msi(struct etherbone_master_context* context)
+{
+	unsigned i;
+	struct wishbone *wb = context->wishbone;
+	
+	if (context->msi_index != -1) return;
+	
+	mutex_lock(&wb->mutex);
+	for (i = 0; i < WISHBONE_MAX_MSI_OPEN; ++i) {
+		if (!wb->msi_map[i]) {
+			context->msi_index = i;
+			wb->msi_map[i] = context;
+			break;
+		}
+	}
+	mutex_unlock(&wb->mutex);
+}
+
+static wb_data_t handle_read_cfg(struct etherbone_master_context* context, wb_addr_t addr)
+{
+	struct wishbone *wb = context->wishbone;
+	wb_data_t wide = (wb->mask/WISHBONE_MAX_MSI_OPEN)+1;
+	switch (addr) {
+	case 32: return 0;                             // request high
+	case 36: return 0;                             // request low
+	case 40: return 0;                             // granted high
+	case 44: return context->msi_index != -1;      // granted low
+	case 48: return 0;                             // low high
+	case 52: return wide*(context->msi_index+0)-0; // low low
+	case 56: return 0;                             // high high
+	case 60: return wide*(context->msi_index+1)-1; // high low
+	default: return wb->wops->read_cfg(wb, addr);
+	}
+}
+
+static void handle_write_cfg(struct etherbone_master_context* context, wb_addr_t addr, wb_data_t data)
+{
+	switch (addr) {
+	case 36: if (data == 1) claim_msi(context); break;
+	default: break;
+	}
+}
+
 static void etherbone_master_process(struct etherbone_master_context* context)
 {
 	struct wishbone *wb;
@@ -176,6 +219,7 @@ static void etherbone_master_process(struct etherbone_master_context* context)
 			
 			if (wca) {
 				for (j = wcount; j > 0; --j) {
+					handle_write_cfg(context, base_address, eb_to_cpu(buf+i));
 					eb_from_cpu(buf+i, 0);
 					i = RING_INDEX(i + sizeof(wb_data_t));
 				}
@@ -205,7 +249,7 @@ static void etherbone_master_process(struct etherbone_master_context* context)
 			
 			if (rca) {
 				for (j = rcount; j > 0; --j) {
-					eb_from_cpu(buf+i, wops->read_cfg(wb, eb_to_cpu(buf+i)));
+					eb_from_cpu(buf+i, handle_read_cfg(context, eb_to_cpu(buf+i)));
 					i = RING_INDEX(i + sizeof(wb_data_t));
 				}
 			} else {
@@ -242,6 +286,8 @@ static int char_master_open(struct inode *inode, struct file *filep)
 	context->sent = 0;
 	context->processed = 0;
 	context->received = 0;
+	context->msi_unread = 0;
+	context->msi_index = -1;
 	
 	filep->private_data = context;
 	
@@ -251,10 +297,18 @@ static int char_master_open(struct inode *inode, struct file *filep)
 static int char_master_release(struct inode *inode, struct file *filep)
 {
 	struct etherbone_master_context *context = filep->private_data;
+	struct wishbone *wb = context->wishbone;
 	
 	/* Did the bad user forget to drop the cycle line? */
 	if (context->state == cycle) {
-		context->wishbone->wops->cycle(context->wishbone, 0);
+		wb->wops->cycle(wb, 0);
+	}
+	
+	/* Unhook any MSI access */
+	if (context->msi_index != -1) {
+		mutex_lock(&wb->mutex);
+		wb->msi_map[context->msi_index] = 0;
+		mutex_unlock(&wb->mutex);
 	}
 	
 	kfree(context);
@@ -381,9 +435,13 @@ static const struct file_operations etherbone_master_fops = {
 int wishbone_register(struct wishbone* wb)
 {
 	struct list_head *list_pos;
-	unsigned int devoff;
+	unsigned int devoff, i;
 	
 	INIT_LIST_HEAD(&wb->list);
+	mutex_init(&wb->mutex);
+	for (i = 0; i < WISHBONE_MAX_MSI_OPEN; ++i) {
+		wb->msi_map[i] = 0;
+	}
 	
 	mutex_lock(&wishbone_mutex);
 	

@@ -453,6 +453,7 @@ static int vme_probe(struct device *pdev, unsigned int ndev)
 	mutex_init(&dev->mutex);
 	dev->wb.wops = &wb_ops;
 	dev->wb.parent = pdev;
+	dev->wb.mask = 0xffff;
         dev->window_offset  = 0;
 
 	/* Map CR/CSR space */

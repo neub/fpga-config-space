@@ -6,7 +6,8 @@
 #include <linux/cdev.h>
 
 #define WISHBONE_VERSION "0.1"
-#define WISHONE_MAX_DEVICES 32	/* default only */
+#define WISHBONE_MAX_DEVICES  32 /* default only */
+#define WISHBONE_MAX_MSI_OPEN 16 /* fixed */
 
 #define ETHERBONE_BCA	0x80
 #define ETHERBONE_RCA	0x40
@@ -55,12 +56,17 @@ struct wishbone
 {
 	const struct wishbone_operations* wops;
 	struct device *parent;
+	wb_addr_t mask;
 	
 	/* internal (guarded by global mutex--register/unregister): */
 	struct list_head list;
 	dev_t master_dev;
 	struct cdev master_cdev;
 	struct device *master_device;
+	
+	/* internal (EB-MSI mapping for this hardware) */
+	struct mutex mutex;
+	struct etherbone_master_context *msi_map[WISHBONE_MAX_MSI_OPEN];
 };
 
 #define RING_SIZE	8192
@@ -79,6 +85,11 @@ struct etherbone_master_context
 	unsigned int sent, processed, received; /* sent <= processed <= received */
 	
 	unsigned char buf[RING_SIZE]; /* Ring buffer */
+	
+	/* MSI record data */
+	unsigned char msi[sizeof(wb_data_t)*6];
+	int msi_unread;
+	int msi_index;
 };
 
 #define RING_READ_LEN(ctx)   RING_POS((ctx)->processed - (ctx)->sent)
