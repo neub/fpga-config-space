@@ -324,9 +324,10 @@ static void etherbone_master_process(struct etherbone_master_context* context)
 			
 			if (wca) {
 				for (j = wcount; j > 0; --j) {
-					handle_write_cfg(context, base_address, eb_to_cpu(buf+i));
 					eb_from_cpu(buf+i, 0);
 					i = RING_INDEX(i + sizeof(wb_data_t));
+					handle_write_cfg(context, base_address, eb_to_cpu(buf+i));
+					base_address += increment;
 				}
 			} else {
 				for (j = wcount; j > 0; --j) {
