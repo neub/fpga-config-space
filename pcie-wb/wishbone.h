@@ -24,7 +24,6 @@ typedef unsigned int wb_data_t;
 
 struct wishbone;
 struct etherbone_master_context;
-struct etherbone_slave_context;
 
 struct wishbone_request
 {
@@ -59,15 +58,9 @@ struct wishbone
 	
 	/* internal (guarded by global mutex--register/unregister): */
 	struct list_head list;
-	dev_t master_dev, slave_dev;
-	struct cdev master_cdev, slave_cdev;
-	struct device *master_device, *slave_device;
-	
-	/* wake-q for blocking slave io */
-	wait_queue_head_t waitq;
-	struct fasync_struct *fasync;
-	struct mutex mutex; /* guards slave below */
-	struct etherbone_slave_context *slave;
+	dev_t master_dev;
+	struct cdev master_cdev;
+	struct device *master_device;
 };
 
 #define RING_SIZE	8192
@@ -86,24 +79,6 @@ struct etherbone_master_context
 	unsigned int sent, processed, received; /* sent <= processed <= received */
 	
 	unsigned char buf[RING_SIZE]; /* Ring buffer */
-};
-
-struct etherbone_slave_context
-{
-	struct wishbone* wishbone;
-	struct mutex mutex;
-	
-	unsigned int pending_err; /* unanswered operations */
-	
-	int negotiated;
-	wb_data_t data;
-
-	unsigned int rbuf_done; /* data remaining to be read: [rbuf_done, rbuf_end) */
-	unsigned int rbuf_end;
-	unsigned char rbuf[sizeof(wb_data_t)*6];
-	
-	unsigned int wbuf_fill; /* data remaining to be processed: [0, wbuf_full) */
-	unsigned char wbuf[sizeof(wb_data_t)*(255*2+3)];
 };
 
 #define RING_READ_LEN(ctx)   RING_POS((ctx)->processed - (ctx)->sent)
