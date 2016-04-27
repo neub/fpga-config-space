@@ -109,6 +109,13 @@ static inline void eb_from_cpu(unsigned char* x, wb_data_t dat)
 	}
 }
 
+static int deliver_msi(struct etherbone_master_context* context)
+{
+	return	context->msi_unread > 0             &&
+		context->sent == context->processed &&
+		context->sent == context->received;
+}
+
 static void claim_msi(struct etherbone_master_context* context)
 {
 	unsigned i;
@@ -327,19 +334,26 @@ static ssize_t char_master_aio_read(struct kiocb *iocb, const struct iovec *iov,
 	if (mutex_lock_interruptible(&context->mutex))
 		return -EINTR;
 	
-	ring_len = RING_READ_LEN(context);
-	len = min_t(unsigned int, ring_len, iov_len);
-	
-	/* How far till we must wrap?  */
-	buf_len = sizeof(context->buf) - RING_INDEX(context->sent);
-	
-	if (buf_len < len) {
-		memcpy_toiovecend(iov, RING_POINTER(context, sent), 0, buf_len);
-		memcpy_toiovecend(iov, &context->buf[0],            buf_len, len-buf_len);
+	/* If MSI is pending, deliver it */
+	if (deliver_msi(context)) {
+		len = min_t(unsigned int, context->msi_unread, iov_len);
+		memcpy_toiovecend(iov, context->msi + sizeof(context->msi) - context->msi_unread, 0, len);
+		context->msi_unread -= len;
 	} else {
-		memcpy_toiovecend(iov, RING_POINTER(context, sent), 0, len);
+		ring_len = RING_READ_LEN(context);
+		len = min_t(unsigned int, ring_len, iov_len);
+		
+		/* How far till we must wrap?  */
+		buf_len = sizeof(context->buf) - RING_INDEX(context->sent);
+		
+		if (buf_len < len) {
+			memcpy_toiovecend(iov, RING_POINTER(context, sent), 0, buf_len);
+			memcpy_toiovecend(iov, &context->buf[0],            buf_len, len-buf_len);
+		} else {
+			memcpy_toiovecend(iov, RING_POINTER(context, sent), 0, len);
+		}
+		context->sent = RING_POS(context->sent + len);
 	}
-	context->sent = RING_POS(context->sent + len);
 	
 	mutex_unlock(&context->mutex);
 	
@@ -403,6 +417,7 @@ static unsigned int char_master_poll(struct file *filep, poll_table *wait)
 	
 	mutex_lock(&context->mutex);
 	
+	if (deliver_msi(context))         mask |= POLLIN  | POLLRDNORM;
 	if (RING_READ_LEN (context) != 0) mask |= POLLIN  | POLLRDNORM;
 	if (RING_WRITE_LEN(context) != 0) mask |= POLLOUT | POLLWRNORM;
 	
