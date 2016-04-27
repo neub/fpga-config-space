@@ -134,6 +134,85 @@ static void claim_msi(struct etherbone_master_context* context)
 	mutex_unlock(&wb->mutex);
 }
 
+/* Must be called with wb->mutex held */
+static void advance_msi(struct wishbone* wb)
+{
+	struct wishbone_request request;
+	struct etherbone_master_context *context;
+	uint8_t *wptr;
+	int index;
+
+	/* Don't process a second MSI while a previous is inflight */
+	if (wb->msi_pending) return;
+	
+retry:	
+	/* If nothing to do, stop */
+	if (wb->wops->request(wb, &request) == 0) return;
+	
+	/* The hardware should already have done this, but be safe */
+	request.addr &= wb->mask;
+	
+	/* If no MSI handler, handle it immediately */
+	index = request.addr / ((wb->mask/WISHBONE_MAX_MSI_OPEN)+1);
+	if (!wb->msi_map[index]) {
+		wb->wops->reply(wb, 1, ~(wb_data_t)0);
+		goto retry;
+	}
+	
+	/* Fill in the MSI data */
+	context = wb->msi_map[index];
+	wptr = &context->msi[0];
+	
+	wptr[0] = ETHERBONE_BCA;
+	wptr[1] = request.mask;
+	if (request.write) {
+		wptr[2] = 1;
+		wptr[3] = 0;
+		wptr += sizeof(wb_data_t);
+		eb_from_cpu(wptr, request.addr);
+		wptr += sizeof(wb_data_t);
+		eb_from_cpu(wptr, request.data);
+		wptr += sizeof(wb_data_t);
+	} else {
+		wptr[2] = 0;
+		wptr[3] = 1;
+		wptr += sizeof(wb_data_t);
+		eb_from_cpu(wptr, WBA_DATA);
+		wptr += sizeof(wb_data_t);
+		eb_from_cpu(wptr, request.addr);
+		wptr += sizeof(wb_data_t);
+	}
+	
+	wptr[0] = ETHERBONE_CYC | ETHERBONE_BCA | ETHERBONE_RCA;
+	wptr[1] = 0xf;
+	wptr[2] = 0;
+	wptr[3] = 1;
+	wptr += sizeof(wb_data_t);
+	
+	eb_from_cpu(wptr, WBA_ERR);
+	wptr += sizeof(wb_data_t);
+	eb_from_cpu(wptr, 4); /* low bits of error status register */
+	wptr += sizeof(wb_data_t);
+	
+	/* Mark the MSI pending */
+	context->msi_unread = wptr - &context->msi[0];
+	context->msi_pending = 1;
+	wb->msi_pending = 1;
+	
+	/* Wake-up any reader of the device */
+	wake_up_interruptible(&context->waitq);
+	kill_fasync(&context->fasync, SIGIO, POLL_IN);
+}
+
+static void respond_msi(struct wishbone* wb, int error)
+{
+	mutex_lock(&wb->mutex);
+	wb->wops->reply(wb, error, wb->msi_data);
+	wb->msi_pending = 0;
+	advance_msi(wb);
+	mutex_unlock(&wb->mutex);
+}
+
 static wb_data_t handle_read_cfg(struct etherbone_master_context* context, wb_addr_t addr)
 {
 	struct wishbone *wb = context->wishbone;
@@ -153,9 +232,28 @@ static wb_data_t handle_read_cfg(struct etherbone_master_context* context, wb_ad
 
 static void handle_write_cfg(struct etherbone_master_context* context, wb_addr_t addr, wb_data_t data)
 {
+	struct wishbone *wb = context->wishbone;
 	switch (addr) {
-	case 36: if (data == 1) claim_msi(context); break;
-	default: break;
+	case 36:
+		if (data == 1) {
+			claim_msi(context);
+		}
+		break;
+		
+	case WBA_DATA:
+		if (context->msi_pending) {
+			mutex_lock(&wb->mutex);
+			wb->msi_data = data;
+			mutex_unlock(&wb->mutex);
+		}
+		break;
+	
+	case WBA_ERR:
+		if (context->msi_pending) { 
+			context->msi_pending = 0;
+			respond_msi(wb, data&1);
+		}
+		break;
 	}
 }
 
@@ -293,8 +391,9 @@ static int char_master_open(struct inode *inode, struct file *filep)
 	context->sent = 0;
 	context->processed = 0;
 	context->received = 0;
-	context->msi_unread = 0;
 	context->msi_index = -1;
+	context->msi_unread = 0;
+	context->msi_pending = 0;
 	
 	filep->private_data = context;
 	
@@ -309,6 +408,12 @@ static int char_master_release(struct inode *inode, struct file *filep)
 	/* Did the bad user forget to drop the cycle line? */
 	if (context->state == cycle) {
 		wb->wops->cycle(wb, 0);
+	}
+	
+	/* Finish any unhandled MSI */
+	if (context->msi_pending) {
+		context->msi_pending = 0;
+		respond_msi(wb, 1);
 	}
 	
 	/* Unhook any MSI access */
@@ -457,6 +562,7 @@ int wishbone_register(struct wishbone* wb)
 	for (i = 0; i < WISHBONE_MAX_MSI_OPEN; ++i) {
 		wb->msi_map[i] = 0;
 	}
+	wb->msi_pending = 0;
 	
 	mutex_lock(&wishbone_mutex);
 	
@@ -530,8 +636,9 @@ int wishbone_unregister(struct wishbone* wb)
 
 void wishbone_slave_ready(struct wishbone* wb)
 {
-	// wake_up_interruptible(&wb->waitq);
-	// kill_fasync(&wb->fasync, SIGIO, POLL_IN);
+	mutex_lock(&wb->mutex);
+	advance_msi(wb);
+	mutex_unlock(&wb->mutex);
 }
 
 static int __init wishbone_init(void)

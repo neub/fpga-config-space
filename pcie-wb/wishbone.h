@@ -67,6 +67,8 @@ struct wishbone
 	/* internal (EB-MSI mapping for this hardware) */
 	struct mutex mutex;
 	struct etherbone_master_context *msi_map[WISHBONE_MAX_MSI_OPEN];
+	wb_data_t msi_data;
+	int msi_pending;
 };
 
 #define RING_SIZE	8192
@@ -86,10 +88,12 @@ struct etherbone_master_context
 	
 	unsigned char buf[RING_SIZE]; /* Ring buffer */
 	
+	/* MSI resource ownership; -1 = nothing */
+	int msi_index;
 	/* MSI record data */
 	unsigned char msi[sizeof(wb_data_t)*6];
 	int msi_unread;
-	int msi_index;
+	int msi_pending;
 };
 
 #define RING_READ_LEN(ctx)   RING_POS((ctx)->processed - (ctx)->sent)
