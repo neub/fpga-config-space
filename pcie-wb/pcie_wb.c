@@ -216,6 +216,8 @@ static wb_data_t wb_read_cfg(struct wishbone *wb, wb_addr_t addr)
 
 static int wb_request(struct wishbone *wb, struct wishbone_request *req)
 {
+	/* All forms of sleep are forbidden in this method (no printk/mutex/etc) */
+	
 	struct pcie_wb_dev* dev;
 	unsigned char* control;
 	uint32_t ctl;
@@ -230,7 +232,6 @@ static int wb_request(struct wishbone *wb, struct wishbone_request *req)
 	req->mask  = ctl & 0xf;
 	req->write = (ctl & 0x40000000) != 0;
 	
-	if (unlikely(debug)) printk(KERN_ALERT "request %x\n", ctl);
 	out = (ctl & 0x80000000) != 0;
 	
 	if (out) iowrite32(1, control + MASTER_CTL_HIGH); /* dequeue operation */
@@ -242,13 +243,14 @@ static int wb_request(struct wishbone *wb, struct wishbone_request *req)
 
 static void wb_reply(struct wishbone *wb, int err, wb_data_t data)
 {
+	/* All forms of sleep are forbidden in this method (no printk/mutex/etc) */
+	
 	struct pcie_wb_dev* dev;
 	unsigned char* control;
 	
 	dev = container_of(wb, struct pcie_wb_dev, wb);
 	control = dev->pci_res[0].addr;
 	
-	if (unlikely(debug)) printk(KERN_ALERT "pushing reply\n");
 	iowrite32(data, control + MASTER_DAT_LOW);
 	iowrite32(err+2, control + MASTER_CTL_HIGH);
 }
@@ -266,9 +268,9 @@ static const struct wishbone_operations wb_ops = {
 
 static irqreturn_t irq_handler(int irq, void *dev_id)
 {
-	struct pcie_wb_dev *dev = dev_id;
+	/* All forms of sleep are forbidden in this method (no printk/mutex/etc) */
 	
-	if (unlikely(debug)) printk(KERN_ALERT "posting MSI\n");
+	struct pcie_wb_dev *dev = dev_id;
 	
 	pcie_int_enable(dev, 0);
 	wishbone_slave_ready(&dev->wb);

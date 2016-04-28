@@ -46,7 +46,7 @@ struct wishbone_operations
 	wb_data_t (*read)(struct wishbone *wb, wb_addr_t addr);
 	wb_data_t (*read_cfg)(struct wishbone *wb, wb_addr_t addr);
 	
-	/* slave operations */
+	/* slave operations, run from interrupt context => MUST NOT SLEEP (no printk/mutex/etc) */
 	int (*request)(struct wishbone *wb, struct wishbone_request*); /* 1=record filled, 0=none pending. re-enable non-MSI interrupts. */
 	void (*reply)(struct wishbone *wb, int err, wb_data_t dat);
 };

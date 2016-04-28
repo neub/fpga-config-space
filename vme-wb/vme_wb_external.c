@@ -154,6 +154,8 @@ static wb_data_t wb_read(struct wishbone *wb, wb_addr_t addr)
 
 static int wb_request(struct wishbone *wb, struct wishbone_request *req)
 {
+	/* All forms of sleep are forbidden in this method (no printk/mutex/etc) */
+	
 	struct vme_wb_dev *dev;
 	unsigned char *ctrl_win;
 	uint32_t ctrl;
@@ -171,17 +173,13 @@ static int wb_request(struct wishbone *wb, struct wishbone_request *req)
 	out = (ctrl & 0x80000000) != 0;
 	if (out) iowrite32(cpu_to_be32(1), ctrl_win + MASTER_CTRL);	/* dequeue operation */
 
-	if (unlikely(debug))
-		printk(KERN_ALERT
-		       "WB REQUEST:Request ctrl %x addr %x data %x mask %x return %x \n",
-		       ctrl, req->addr, req->data, req->mask,
-		       (ctrl & 0x80000000) != 0);
-
 	return out;
 }
 
 static void wb_reply(struct wishbone *wb, int err, wb_data_t data)
 {
+	/* All forms of sleep are forbidden in this method (no printk/mutex/etc) */
+	
 	struct vme_wb_dev *dev;
 	unsigned char *ctrl_win;
 
@@ -190,10 +188,6 @@ static void wb_reply(struct wishbone *wb, int err, wb_data_t data)
 
 	iowrite32(cpu_to_be32(data), ctrl_win + MASTER_DATA);
 	iowrite32(cpu_to_be32(err + 2), ctrl_win + MASTER_CTRL);
-
-	if (unlikely(debug))
-		printk(KERN_ALERT "WB REPLY: pushing data %x reply %x\n", data,
-		       err + 2);
 }
 
 static void wb_byteenable(struct wishbone *wb, unsigned char be)
@@ -235,10 +229,9 @@ static void init_ctrl_reg(struct vme_wb_dev *dev)
 
 int irq_handler(void *dev_id)
 {
+	/* All forms of sleep are forbidden in this method (no printk/mutex/etc) */
+	
 	struct vme_wb_dev *dev = dev_id;
-
-        if (unlikely(debug))
-		printk(KERN_ALERT VME_WB ": IRQ!!\n");
 
 	wishbone_slave_ready(&dev->wb);
 
