@@ -419,6 +419,11 @@ static int char_master_release(struct inode *inode, struct file *filep)
 	
 	spin_lock_irqsave(&wb->spinlock, flags);
 	
+	/* Unhook any MSI access */
+	if (context->msi_index != -1) {
+		wb->msi_map[context->msi_index] = 0;
+	}
+	
 	/* Finish any unhandled MSI */
 	if (context->msi_pending) {
 		context->msi_pending = 0;
@@ -427,10 +432,6 @@ static int char_master_release(struct inode *inode, struct file *filep)
 		advance_msi(wb);
 	}
 	
-	/* Unhook any MSI access */
-	if (context->msi_index != -1) {
-		wb->msi_map[context->msi_index] = 0;
-	}
 	spin_unlock_irqrestore(&wb->spinlock, flags);
 	
 	kfree(context);
