@@ -164,13 +164,12 @@ retry:
 	
 	/* If no MSI handler, handle it immediately */
 	index = request.addr / ((wb->mask/WISHBONE_MAX_MSI_OPEN)+1);
-	if (!wb->msi_map[index]) {
+	if (!(context = wb->msi_map[index])) {
 		wb->wops->reply(wb, 1, ~(wb_data_t)0);
 		goto retry;
 	}
 	
 	/* Fill in the MSI data */
-	context = wb->msi_map[index];
 	wptr = &context->msi[0];
 	
 	wptr[0] = ETHERBONE_BCA;
@@ -625,6 +624,10 @@ int wishbone_register(struct wishbone* wb)
 	list_add_tail(&wb->list, list_pos);
 	
 	mutex_unlock(&wishbone_mutex);
+	
+	/* Startup the MSI queue */
+	wishbone_slave_ready(wb);
+	
 	return 0;
 
 fail_master_cdev:
