@@ -6,6 +6,7 @@
 #include <linux/kernel.h>
 #include <linux/major.h>
 #include <linux/mutex.h>
+#include <linux/spinlock.h>
 #include <linux/proc_fs.h>
 #include <linux/stat.h>
 #include <linux/init.h>
@@ -111,19 +112,29 @@ static inline void eb_from_cpu(unsigned char* x, wb_data_t dat)
 
 static int deliver_msi(struct etherbone_master_context* context)
 {
-	return	context->msi_unread > 0             &&
+	unsigned long flags;
+	int out;
+	struct wishbone *wb = context->wishbone;
+	
+	/* msi_unread is protected by the spinlock */
+	spin_lock_irqsave(&wb->spinlock, flags);
+	out =	context->msi_unread > 0             &&
 		context->sent == context->processed &&
 		context->sent == context->received;
+	spin_unlock_irqrestore(&wb->spinlock, flags);   
+	
+	return out;
 }
 
+/* Must be called with wb->spinlock and mutex held */
 static void claim_msi(struct etherbone_master_context* context)
 {
 	unsigned i;
 	struct wishbone *wb = context->wishbone;
 	
+	/* Safe to read msi_index here, because mutex held */
 	if (context->msi_index != -1) return;
 	
-	mutex_lock(&wb->mutex);
 	for (i = 0; i < WISHBONE_MAX_MSI_OPEN; ++i) {
 		if (!wb->msi_map[i]) {
 			context->msi_index = i;
@@ -131,10 +142,9 @@ static void claim_msi(struct etherbone_master_context* context)
 			break;
 		}
 	}
-	mutex_unlock(&wb->mutex);
 }
 
-/* Must be called with wb->mutex held */
+/* Must be called with wb->spinlock held */
 static void advance_msi(struct wishbone* wb)
 {
 	struct wishbone_request request;
@@ -204,17 +214,9 @@ retry:
 	kill_fasync(&context->fasync, SIGIO, POLL_IN);
 }
 
-static void respond_msi(struct wishbone* wb, int error)
-{
-	mutex_lock(&wb->mutex);
-	wb->wops->reply(wb, error, wb->msi_data);
-	wb->msi_pending = 0;
-	advance_msi(wb);
-	mutex_unlock(&wb->mutex);
-}
-
 static wb_data_t handle_read_cfg(struct etherbone_master_context* context, wb_addr_t addr)
 {
+	/* Safe to read msi_index here, because mutex held */
 	struct wishbone *wb = context->wishbone;
 	wb_data_t wide = (wb->mask/WISHBONE_MAX_MSI_OPEN)+1;
 	switch (addr) {
@@ -232,7 +234,10 @@ static wb_data_t handle_read_cfg(struct etherbone_master_context* context, wb_ad
 
 static void handle_write_cfg(struct etherbone_master_context* context, wb_addr_t addr, wb_data_t data)
 {
+	unsigned long flags;
 	struct wishbone *wb = context->wishbone;
+	
+	spin_lock_irqsave(&wb->spinlock, flags);
 	switch (addr) {
 	case 36:
 		if (data == 1) {
@@ -242,19 +247,20 @@ static void handle_write_cfg(struct etherbone_master_context* context, wb_addr_t
 		
 	case WBA_DATA:
 		if (context->msi_pending) {
-			mutex_lock(&wb->mutex);
 			wb->msi_data = data;
-			mutex_unlock(&wb->mutex);
 		}
 		break;
 	
 	case WBA_ERR:
 		if (context->msi_pending) { 
 			context->msi_pending = 0;
-			respond_msi(wb, data&1);
+			wb->msi_pending = 0;
+			wb->wops->reply(wb, data&1, wb->msi_data);
+			advance_msi(wb);
 		}
 		break;
 	}
+	spin_unlock_irqrestore(&wb->spinlock, flags);
 }
 
 static void etherbone_master_process(struct etherbone_master_context* context)
@@ -403,6 +409,7 @@ static int char_master_open(struct inode *inode, struct file *filep)
 
 static int char_master_release(struct inode *inode, struct file *filep)
 {
+	unsigned long flags;
 	struct etherbone_master_context *context = filep->private_data;
 	struct wishbone *wb = context->wishbone;
 	
@@ -411,18 +418,21 @@ static int char_master_release(struct inode *inode, struct file *filep)
 		wb->wops->cycle(wb, 0);
 	}
 	
+	spin_lock_irqsave(&wb->spinlock, flags);
+	
 	/* Finish any unhandled MSI */
 	if (context->msi_pending) {
 		context->msi_pending = 0;
-		respond_msi(wb, 1);
+		wb->msi_pending = 0;
+		wb->wops->reply(wb, 1, ~(wb_data_t)0);
+		advance_msi(wb);
 	}
 	
 	/* Unhook any MSI access */
 	if (context->msi_index != -1) {
-		mutex_lock(&wb->mutex);
 		wb->msi_map[context->msi_index] = 0;
-		mutex_unlock(&wb->mutex);
 	}
+	spin_unlock_irqrestore(&wb->spinlock, flags);
 	
 	kfree(context);
 	return 0;
@@ -442,6 +452,9 @@ static ssize_t char_master_aio_read(struct kiocb *iocb, const struct iovec *iov,
 	
 	/* If MSI is pending, deliver it */
 	if (deliver_msi(context)) {
+		/* We don't need a lock here, because no one will write to the msi_unread or
+		 * msi[] while msi_pending stays high.
+		 */
 		len = min_t(unsigned int, context->msi_unread, iov_len);
 		memcpy_toiovecend(iov, context->msi + sizeof(context->msi) - context->msi_unread, 0, len);
 		context->msi_unread -= len;
@@ -559,7 +572,7 @@ int wishbone_register(struct wishbone* wb)
 	unsigned int devoff, i;
 	
 	INIT_LIST_HEAD(&wb->list);
-	mutex_init(&wb->mutex);
+	spin_lock_init(&wb->spinlock);
 	for (i = 0; i < WISHBONE_MAX_MSI_OPEN; ++i) {
 		wb->msi_map[i] = 0;
 	}
@@ -637,9 +650,10 @@ int wishbone_unregister(struct wishbone* wb)
 
 void wishbone_slave_ready(struct wishbone* wb)
 {
-	mutex_lock(&wb->mutex);
+	unsigned long flags;
+	spin_lock_irqsave(&wb->spinlock, flags);
 	advance_msi(wb);
-	mutex_unlock(&wb->mutex);
+	spin_unlock_irqrestore(&wb->spinlock, flags);
 }
 
 static int __init wishbone_init(void)

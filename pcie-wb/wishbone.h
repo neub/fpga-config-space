@@ -64,8 +64,8 @@ struct wishbone
 	struct cdev master_cdev;
 	struct device *master_device;
 	
-	/* internal (EB-MSI mapping for this hardware) */
-	struct mutex mutex;
+	/* internal (guarded by the spinlock--EB-MSI mapping for this hardware) */
+	spinlock_t spinlock;
 	struct etherbone_master_context *msi_map[WISHBONE_MAX_MSI_OPEN];
 	wb_data_t msi_data;
 	int msi_pending;
@@ -89,8 +89,10 @@ struct etherbone_master_context
 	unsigned char buf[RING_SIZE]; /* Ring buffer */
 	
 	/* MSI resource ownership; -1 = nothing */
+	/* Write access requires both mutex AND spinlock */
 	int msi_index;
 	/* MSI record data */
+	/* Access to these are protected by the wishbone->spinlock */
 	unsigned char msi[sizeof(wb_data_t)*6];
 	int msi_unread;
 	int msi_pending;
