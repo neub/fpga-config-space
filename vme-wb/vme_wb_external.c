@@ -49,17 +49,11 @@ static void wb_cycle(struct wishbone *wb, int on)
 
 	ctrl_win = dev->vme_res.map[MAP_CTRL]->kernel_va;
 
-	if (on)
-		mutex_lock(&dev->mutex);
-
 	if (unlikely(debug))
 		printk(KERN_ALERT ": Cycle(%d)\n", on);
 
 	iowrite32(cpu_to_be32((on ? 0x80000000UL : 0) + 0x40000000UL),
 		  ctrl_win + CTRL);
-
-	if (!on)
-		mutex_unlock(&dev->mutex);
 }
 
 static wb_data_t wb_read_cfg(struct wishbone *wb, wb_addr_t addr)
@@ -154,8 +148,6 @@ static wb_data_t wb_read(struct wishbone *wb, wb_addr_t addr)
 
 static int wb_request(struct wishbone *wb, struct wishbone_request *req)
 {
-	/* All forms of sleep are forbidden in this method (no printk/mutex/etc) */
-	
 	struct vme_wb_dev *dev;
 	unsigned char *ctrl_win;
 	uint32_t ctrl;
@@ -178,8 +170,6 @@ static int wb_request(struct wishbone *wb, struct wishbone_request *req)
 
 static void wb_reply(struct wishbone *wb, int err, wb_data_t data)
 {
-	/* All forms of sleep are forbidden in this method (no printk/mutex/etc) */
-	
 	struct vme_wb_dev *dev;
 	unsigned char *ctrl_win;
 
@@ -229,8 +219,6 @@ static void init_ctrl_reg(struct vme_wb_dev *dev)
 
 int irq_handler(void *dev_id)
 {
-	/* All forms of sleep are forbidden in this method (no printk/mutex/etc) */
-	
 	struct vme_wb_dev *dev = dev_id;
 
 	wishbone_slave_ready(&dev->wb);
@@ -443,7 +431,6 @@ static int vme_probe(struct device *pdev, unsigned int ndev)
 	dev->vme_res.vector = vector[ndev];
 	dev->vme_res.level = level[ndev];	/* Default value */
 	dev->vme_dev = pdev;
-	mutex_init(&dev->mutex);
 	dev->wb.wops = &wb_ops;
 	dev->wb.parent = pdev;
 	dev->wb.mask = 0xffff;

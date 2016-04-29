@@ -37,12 +37,8 @@ static void wb_cycle(struct wishbone* wb, int on)
 	
 	dev = container_of(wb, struct spec_wb_dev, wb);
 	
-	if (on) mutex_lock(&dev->mutex);
-	
 	if (unlikely(debug))
 		printk(KERN_ALERT SPEC_WB ": cycle(%d)\n", on);
-	
-	if (!on) mutex_unlock(&dev->mutex);
 }
 
 static void wb_byteenable(struct wishbone* wb, unsigned char be)
@@ -270,7 +266,6 @@ static int probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	dev->wb.parent = &pdev->dev;
 	dev->wb.mask = 0; // not MSI capable
 	dev->msi = 1;
-	mutex_init(&dev->mutex);
 	dev->window_offset = 0;
 	dev->low_addr = 0;
 	dev->width = 4;

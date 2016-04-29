@@ -60,14 +60,10 @@ static void wb_cycle(struct wishbone* wb, int on)
 	dev = container_of(wb, struct pcie_wb_dev, wb);
 	control = dev->pci_res[0].addr;
 	
-	if (on) mutex_lock(&dev->mutex);
-	
 	if (unlikely(debug))
 		printk(KERN_ALERT PCIE_WB ": cycle(%d)\n", on);
 	
 	iowrite32((on?0x80000000UL:0) + 0x40000000UL, control + CONTROL_REGISTER_HIGH);
-	
-	if (!on) mutex_unlock(&dev->mutex);
 }
 
 static void wb_byteenable(struct wishbone* wb, unsigned char be)
@@ -216,8 +212,6 @@ static wb_data_t wb_read_cfg(struct wishbone *wb, wb_addr_t addr)
 
 static int wb_request(struct wishbone *wb, struct wishbone_request *req)
 {
-	/* All forms of sleep are forbidden in this method (no printk/mutex/etc) */
-	
 	struct pcie_wb_dev* dev;
 	unsigned char* control;
 	uint32_t ctl;
@@ -243,8 +237,6 @@ static int wb_request(struct wishbone *wb, struct wishbone_request *req)
 
 static void wb_reply(struct wishbone *wb, int err, wb_data_t data)
 {
-	/* All forms of sleep are forbidden in this method (no printk/mutex/etc) */
-	
 	struct pcie_wb_dev* dev;
 	unsigned char* control;
 	
@@ -268,8 +260,6 @@ static const struct wishbone_operations wb_ops = {
 
 static irqreturn_t irq_handler(int irq, void *dev_id)
 {
-	/* All forms of sleep are forbidden in this method (no printk/mutex/etc) */
-	
 	struct pcie_wb_dev *dev = dev_id;
 	
 	pcie_int_enable(dev, 0);
@@ -348,7 +338,6 @@ static int probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	dev->wb.wops = &wb_ops;
 	dev->wb.parent = &pdev->dev;
 	dev->wb.mask = 0xffff;
-	mutex_init(&dev->mutex);
 	dev->window_offset = 0;
 	dev->low_addr = 0;
 	dev->width = 4;
