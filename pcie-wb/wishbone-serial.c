@@ -36,7 +36,7 @@
 #elif LINUX_VERSION_CODE >= KERNEL_VERSION(3,7,0) && LINUX_VERSION_CODE < KERNEL_VERSION(3,10,0)
 #define API 7 /* v3.7 v3.8 v3.9 */
 #elif LINUX_VERSION_CODE >= KERNEL_VERSION(3,10,0)
-#error Enable and use the driver in your native kernel, not this one
+#warning Enable and use the driver in your native kernel, not this one
 #define API 8 /* v3.10+ */
 #else
 #error Unsupported kernel version
@@ -146,7 +146,7 @@ static int wishbone_serial_open(struct tty_struct *tty, struct usb_serial_port *
 		       retval);
 		return retval;
 	}
-	
+
 #if API <= 1
 	wishbone_serial_set_termios(port, NULL);
 #endif
