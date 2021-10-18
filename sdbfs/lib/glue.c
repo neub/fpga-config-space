@@ -2,7 +2,7 @@
  * Copyright (C) 2012,2014 CERN (www.cern.ch)
  * Author: Alessandro Rubini <rubini@gnudd.com>
  *
- * Released according to the GNU GPL, version 2 or any later version.
+ * Released according to GNU LGPL, version 2.1 or any later
  *
  * This work is part of the White Rabbit project, a research effort led
  * by CERN, the European Institute for Nuclear Research.
