@@ -1,5 +1,7 @@
 /*
  * This is the official version 1.1 of sdb.h
+ *
+ * Released to the public domain
  */
 #ifndef __SDB_H__
 #define __SDB_H__

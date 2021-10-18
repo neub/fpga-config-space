@@ -1,5 +1,14 @@
+/*
+ * Copyright (C) 2012,2014 CERN (www.cern.ch)
+ * Author: Alessandro Rubini <rubini@gnudd.com>
+ *
+ * Released according to GNU LGPL, version 2.1 or any later
+ *
+ */
+
 #ifndef __LIBSDBFS_H__
 #define __LIBSDBFS_H__
+
 
 /* The library can work in different environments, take care of them */
 #ifdef __KERNEL__

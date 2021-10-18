@@ -27,3 +27,10 @@ The thing is split in three parts
 Since SDB is used to self-describe a bus, you can even mount sdbfs
 over a real bus. In this case however only mmap is allowed on the
 individual files (no read or write method is there).
+
+
+LICENSES:
+=========
+
+* The sdbfs library is released under LGPL v2.1 license and can be included as a library into proprietary binaries.
+* The userspace tools and kernel drivers are released under GPL v2 library.
